@@ -54,8 +54,89 @@ func init() {
 
 
 
-func checkErr(err error) {
+func checkErr(err error) { //create an error function.
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func homeHandler(w *http.ResponseWriter,r *http.Request) {
+	err := rnd.Template(w, http.StatusOK, []string{"static/home/tpl"}, nil)
+	checkErr(err)
+}
+func fetchTodos(w *http.ResponseWriter, r *http.Request){
+	todos := []todoModel{}
+	if err := db.C(collectionName).Find(bson.M{}.All(&todos)); err != nil {
+		rnd.JSON(w, http.StatusProcessing, renderer.M{
+			"message":"Failed to fetch Todo",
+			"error":err,
+		})
+		return 
+	} 
+	todoList := []todo{}
+
+	for _, t := range todos{
+		todoList = append(todoList, todo{
+			ID:         t.ID.Hex(),
+			Title:      t.Title,
+			Completed:  t.Completed,
+			CreatedAt:  t.CreatedAt,
+			})
+	}
+	rnd.JSON(w, http.StatusOK, renderer.M{
+		"data": todoList,
+		})
+
+}
+
+
+func main() {
+
+	stopChan := make(chan, os.signal) //stop server gracefully using a go channel.
+	signal.Notify(stopChan, os.Interrupt) //making use of the golang os package to recieve and send signals for terminating our golang
+	//program gracefully
+
+	r := chi.NewRouter() //initializes a new route handler to handle http requests.
+
+	r.Use(middleware) //help to apply middleware to all registered router.
+
+	r.Get("/", homeHandler) //router for handling GET http request
+
+	r.Mount("/todo", todoHandlers) // mounts group of routes under the /todo prefix.
+
+	srv := &http.Server{
+		Addr: port,
+		Handler: r,
+		ReadTimeout: 60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout: 60 * time.Second,
+	}
+
+	go func(){
+		log.Println("listening on port", port)
+		if err := srv.ListenAndServe(); err != nil {
+			log.Fatalf("%s\n", err)
+		}
+	}()
+
+	<-stopChan //channel for the stopChan variable
+	log.Println("shutting Down server gracefully.")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	srv.Shutdown(ctx)
+	defer cancel()
+	log.Println("server gracefully stopped")
+
+}
+
+func todo.todoHandlers() http.Handler{
+	rg := chi.NewRouter()
+	rg.Group(func(r chi.Router) {
+	r.Get("/" fetchTodos)
+	r.Post("/",createTodo)
+	r.Put("/{id}", updateTodo)
+	r.Delete("/{id}", deleteTodo)
+
+
+})
+return rg
 }
