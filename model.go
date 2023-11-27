@@ -4,7 +4,7 @@ import(
 	"encoding/json"
 	"log"
 	"net/http"
-	"string"
+	"strings"
 	"time"
 	"context"
 	"os"
@@ -29,10 +29,10 @@ const(
 
 type (
 	todoModel struct {
-		ID			bson.ObjectId	`json:"_id,omitempty" bson
+		ID			bson.ObjectId	`bson:"_id,omitempty"`
 		Title		string	`bson:"title"`
-		Completed	bool	`bson:""`
-		CreatedAt	time.Time `bson:"createdAt`
+		Completed	bool	`bson:"completed"`
+		CreatedAt	time.Time `bson:"createdAt"`
 	}
 	todo struct {
 		ID	 string `json:"id"`
@@ -60,12 +60,14 @@ func checkErr(err error) { //create an error function.
 	}
 }
 
-func homeHandler(w *http.ResponseWriter,r *http.Request) {
+func homeHandler(w *http.ResponseWriter,r *http.Request) { //function to handle our home page
 	err := rnd.Template(w, http.StatusOK, []string{"static/home/tpl"}, nil)
 	checkErr(err)
 }
-func fetchTodos(w *http.ResponseWriter, r *http.Request){
-	todos := []todoModel{}
+
+//function to handle retrieved data from database.
+func fetchTodos(w http.ResponseWriter, r *http.Request){
+	todos := []todoModel{} // declared a variable 
 	if err := db.C(collectionName).Find(bson.M{}.All(&todos)); err != nil {
 		rnd.JSON(w, http.StatusProcessing, renderer.M{
 			"message":"Failed to fetch Todo",
@@ -88,11 +90,108 @@ func fetchTodos(w *http.ResponseWriter, r *http.Request){
 		})
 
 }
+//send response back to user frontend.
+func createTodo(w, r *http.Request) {
+	var t todo
+	if err := json.NewDecoder(r.body).Decode(&t); err!=nil {
+		rnd.JSON(w, http.StatusProcessing, err)
+		return
+	}
+	if t.Title == ""{
+		rnd.JSON(w, http.StatusBadRequest, renderer.M{
+			"message":"title is required.",
+		})
+		return
+	}
+	td := todoModel{
+		ID: bson.NewObjectId(),
+		Title: t.Title,
+		Completed: false,
+		CreatedAt: time.Now(),
+	}
+
+	if err := db.C(collectionName).Insert(&tm); err!=nil {
+		rnd.JSON(w, http.StatusProcessing, renderer.M{
+			"message":"Error creating todo",
+			"error":err,
+		})
+		return
+	}
+
+	rnd.JSON(w, http.StatusCreated, renderer.M{
+		"message":"Successfully created todo",
+		"todo-id": td.ID.Hex(),
+	})
+
+
+}
+
+func deleteTodo(w http.ResponseWriter, r *Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if !bson.IsObjectIdHex(id){
+		rnd.JSON(w, http.StatusBadRequest, renderer.M{
+			"message":"Invalid ID format",
+		})
+		return
+	}
+	if err := db.C(collectionName).RemoveId(bson.ObjectIdHex(Id)); err != nil {
+		rnd.JSON(w, http.StatusProcessing, renderer.M{
+			"message":"Error deleting todo",
+			"error":err,
+	})
+	return
+
+	}
+	rnd.JSON(w, http.StatusOK, renderer.M{
+		"message":"Deleted Todo Successfully",
+		})
+
+
+}
+
+func updateTodo(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+
+	if !bson.IsObjectIdHex(id){
+		rnd.JSON(w, http.StatusBadRequest, renderer.M{
+			"message":"Invalid ID format",
+	})
+	return
+}
+var t todo
+if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+	rnd.JSON(w, http.StatusProcessing, err)
+	return
+}
+if t.Title == ""{
+	rnd.JSON(w, http.StatusBadRequest, renderer.M{
+		"Message": "Title field required.",
+	})
+	return
+}
+
+if err := db.C(collectionName).
+	Update(
+		bson.M{"_id": bson.ObjectIdHex(id)},
+		bson.M{"title": t.Title, "completed": t.Completed},
+	); err != nil {
+		rnd.JSON(w, http.StatusProcessing, renderer.M{
+			"message":"Error updating todo",
+			"error":err,
+			})
+
+			return
+	}
+
+}
+
+
+	
 
 
 func main() {
 
-	stopChan := make(chan, os.signal) //stop server gracefully using a go channel.
+	stopChan := make(chan os.Signal) //stop server gracefully using a go channel.
 	signal.Notify(stopChan, os.Interrupt) //making use of the golang os package to recieve and send signals for terminating our golang
 	//program gracefully
 
@@ -128,11 +227,11 @@ func main() {
 
 }
 
-func todo.todoHandlers() http.Handler{
+func todoHandlers() http.Handler{
 	rg := chi.NewRouter()
 	rg.Group(func(r chi.Router) {
-	r.Get("/" fetchTodos)
-	r.Post("/",createTodo)
+	r.Get("/", fetchTodos)
+	r.Post("/", createTodo)
 	r.Put("/{id}", updateTodo)
 	r.Delete("/{id}", deleteTodo)
 
